@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NexaCloud — Console</title>
+  <meta name="description" content="NexaCloud unified control plane for platform teams.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <div class="bg-grid"></div>
+
+  <nav class="navbar">
+    <div class="nav-inner">
+      <a class="logo" href="#/">
+        <span id="brand">
+          <svg width="26" height="26" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+            <rect width="28" height="28" rx="7" fill="#6C63FF"/>
+            <path d="M7 14L12 9L17 14L22 9" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M7 19L12 14L17 19L22 14" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
+          </svg>
+        </span>
+        <span>NexaCloud</span>
+      </a>
+      <div class="nav-links">
+        <a href="#/status">Status</a>
+        <a href="#/docs">Docs</a>
+        <a href="#/search">Search</a>
+        <a href="#/admin">Admin</a>
+        <span id="session-chip" class="chip hidden"></span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <div id="view"><!-- rendered by app.js --></div>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <span>© 2026 NexaCloud Inc.</span>
+      <span>support@nexacloud.example</span>
+      <span class="muted">Security research sandbox — not a live service.</span>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>

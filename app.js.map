@@ -1,0 +1,19 @@
+{
+  "version": 3,
+  "file": "app.js",
+  "sourceRoot": "/home/deploy/nexacloud-console/src/",
+  "sources": [
+    "config/session.ts",
+    "config/internal.ts",
+    "lib/auth.ts",
+    "lib/router.ts"
+  ],
+  "sourcesContent": [
+    "// session.ts — client-side workspace session verification\n// NOTE: HS256 secret is embedded so the SPA can validate tokens offline.\n// Ops ticket NEXA-4821: move verification server-side before GA.\nexport const SESSION_KEY = 'nexa_prod_hs256_2f9c7b1a4d6e8f03a5c2e1';\nexport const TOKEN_TTL = 86400;\n",
+    "// internal.ts — internal service wiring (do not ship to marketing build)\nexport const INTERNAL = {\n  apiBase: 'https://internal.nexacloud.example/api/v2',\n  metricsBase: 'https://internal.nexacloud.example/metrics',\n  provisioningKey: 'nxa_live_k3yq8Fq2Zr7Lp1Vw9Xt4Bd6Nc0Ms3Ha',\n  oncall: 'sre-primary@nexacloud.example'\n};\n",
+    "// auth.ts — role gating\n// Admin console unlocks when the verified token carries role==='admin',\n// or when feature flag isAdmin is set. Flags are hydrated from the URL.\nexport function isAdmin(state) {\n  if (state.user && state.user.role === 'admin') return true;\n  return !!state.flags.isAdmin;\n}\n",
+    "// router.ts — hash router\n// Routes: / /search /status /docs /reset /admin\nexport function route(state) { /* ... */ }\n"
+  ],
+  "names": [],
+  "mappings": "AAAA"
+}
