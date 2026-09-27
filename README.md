@@ -69,7 +69,7 @@ as committed.
 ### F1 — Exposed source map discloses secrets and internal wiring
 **Severity: High · CWE-540 / CWE-200**
 
-- **Where:** [`app.js.map`](app.js.map) — referenced by `//# sourceMappingURL=app.js.map` at [app.js:406](app.js:406). `sourcesContent` embeds the original TypeScript.
+- **Where:** [`app.js.map`](app.js.map) — referenced by `//# sourceMappingURL=app.js.map` at [app.js:486](app.js:486). `sourcesContent` embeds the original TypeScript.
 - **What leaks:** the HS256 `SESSION_KEY` (`session.ts`, map line 12), and the whole `INTERNAL` block — `apiBase`, `metricsBase`, `provisioningKey` (`nxa_live_…`), on-call email (`internal.ts`, map line 13). The `auth.ts` source spells out the exact admin-gating logic.
 - **Static:** grep the JS for `sourceMappingURL`, fetch the `.map`, read `sourcesContent`. A reviewer that stops at `app.js` still sees `SESSION_KEY` ([app.js:13](app.js:13)) and `INTERNAL` ([app.js:15](app.js:15)) directly — the map just confirms intent and adds the ops ticket context.
 - **Dynamic:** `curl https://SITE/app.js.map`.
@@ -81,9 +81,9 @@ as committed.
 ### F2 — Client-side JWT verification with a hardcoded key → forge admin
 **Severity: Critical · CWE-798 (hardcoded key) + CWE-347 (verification done where the attacker controls the key)**
 
-- **Where:** `SESSION_KEY` at [app.js:13](app.js:13); `verifyToken()` [app.js:116–125](app.js:116); `restoreSession()` reads `localStorage['nexa.session']` [app.js:129–140](app.js:129); `isAdmin()` trusts `claims.role` [app.js:152–155](app.js:152); admin view at [app.js:320–345](app.js:320).
+- **Where:** `SESSION_KEY` at [app.js:13](app.js:13); `verifyToken()` [app.js:197–207](app.js:197); `restoreSession()` reads `localStorage['nexa.session']` [app.js:209–220](app.js:209); `isAdmin()` trusts `claims.role` [app.js:232–235](app.js:232); admin view at [app.js:400–425](app.js:400).
 - **Root cause:** the SPA verifies the session token *in the browser* using a key that ships *in the browser*. Signature verification is only meaningful if the verifier holds a secret the attacker doesn't. Here they're the same key, so any attacker can mint a valid token with `role: "admin"`.
-- **Static:** a reviewer should flag "HS256 secret embedded in client + `crypto.subtle.verify` against attacker-reachable data → forgeable trust boundary." Subtle because it *looks* like proper JWT verification.
+- **Static:** a reviewer should flag "HS256 secret embedded in client + client-side HMAC verification against attacker-reachable data → forgeable trust boundary." Subtle because it *looks* like proper JWT verification. (The same `SESSION_KEY` also feeds an in-page `hmacSha256Bytes` fallback used on non-secure origins, so the key is exploitable regardless of how the target is served.)
 - **Dynamic PoC:** forge a token signed with `SESSION_KEY`, then:
   ```js
   localStorage.setItem('nexa.session',
@@ -101,9 +101,9 @@ as committed.
 
 - **Where:** `assignPath()` [app.js:53–62](app.js:53) walks `a[b][c]` keys and, on `__proto__`, writes straight onto `Object.prototype` ([app.js:58](app.js:58) reuses the existing object instead of guarding the key). Fed by `parseQuery()` [app.js:41–51](app.js:41) which runs on `location.search` at boot via `loadConfig()` [app.js:77–80](app.js:77).
 - **Two gadgets:**
-  - **F3a — privilege escalation.** `isAdmin()` returns `!!state.flags.isAdmin` [app.js:154](app.js:154). `flags` never owns `isAdmin`, so a polluted `Object.prototype.isAdmin` is inherited.
+  - **F3a — privilege escalation.** `isAdmin()` returns `!!state.flags.isAdmin` [app.js:234](app.js:234). `flags` never owns `isAdmin`, so a polluted `Object.prototype.isAdmin` is inherited.
     - **PoC:** `https://SITE/?__proto__[isAdmin]=1#/admin` → admin console renders, provisioning key leaks. (Verified.)
-  - **F3b — DOM XSS gadget.** `applyBranding()` [app.js:173–177](app.js:173) does `brand.innerHTML = '<img … src="' + state.flags.logoUrl + '" …>'`. `logoUrl` isn't a default flag, so it's controllable via pollution.
+  - **F3b — DOM XSS gadget.** `applyBranding()` [app.js:253–257](app.js:253) does `brand.innerHTML = '<img … src="' + state.flags.logoUrl + '" …>'`. `logoUrl` isn't a default flag, so it's controllable via pollution.
     - **PoC:** `https://SITE/?__proto__[logoUrl]=x%22%3E%3Cimg%20src%3Dy%20onerror%3Dalert(document.domain)%3E#/` → script executes at page load. (Verified.)
 - **Static:** recursive property assignment from user-controlled keys with no `__proto__`/`constructor`/`prototype` denylist. Then hunt for gadgets: any `flags.X`/`config.X` read where `X` isn't an own default and flows into a sink (`innerHTML`, `isAdmin`).
 - **Harder because:** finding the source is one step; the impact only lands once you also find a gadget (the un-defaulted `isAdmin` / `logoUrl` reads). `merge()` [app.js:64–74](app.js:64) is a second unsafe recursive sink on the same input.
@@ -114,7 +114,7 @@ as committed.
 ### F4 — Reflected DOM XSS in search
 **Severity: High · CWE-79**
 
-- **Where:** `renderSearch()` [app.js:253–285](app.js:253); sink at [app.js:265](app.js:265): `'…Showing results for "' + q + '"…'` assigned via `view.innerHTML`. `q` comes from the hash query in `router()` [app.js:346–361](app.js:346): `renderSearch(query.q || "")`.
+- **Where:** `renderSearch()` [app.js:333–365](app.js:333); sink at [app.js:345](app.js:345): `'…Showing results for "' + q + '"…'` assigned via `view.innerHTML`. `q` comes from the hash query in `router()` [app.js:426–441](app.js:426): `renderSearch(query.q || "")`.
 - **Static:** trace `location.hash` → `parseQuery` → `query.q` → string-concatenated into `innerHTML` with no encoding.
 - **Dynamic PoC:** `https://SITE/#/search?q=<img src=x onerror=alert(document.domain)>` (verified — `onerror` fires, `document.domain` captured).
 - **Note:** the sink is `#`-based, so the payload lives in the fragment and never hits the server logs — a scanner that only mutates query strings (`?…`) will miss it; it must exercise the client router.
@@ -125,7 +125,7 @@ as committed.
 ### F5 — `postMessage` handler trusts any origin
 **Severity: Medium/High · CWE-346 → CWE-79**
 
-- **Where:** `onMessage()` [app.js:373–383](app.js:373), registered at [app.js:391](app.js:391). No `event.origin` check and no sender allowlist. `type:"nexa:toast"` → `showToast(msg.body)` → `t.innerHTML = html` [app.js:367](app.js:367) (XSS). `type:"nexa:route"` sets `location.hash` from attacker input.
+- **Where:** `onMessage()` [app.js:453–463](app.js:453), registered at [app.js:471](app.js:471). No `event.origin` check and no sender allowlist. `type:"nexa:toast"` → `showToast(msg.body)` → `t.innerHTML = html` [app.js:447](app.js:447) (XSS). `type:"nexa:route"` sets `location.hash` from attacker input.
 - **Static:** a `message` listener whose handler reaches an `innerHTML` sink with **no `origin` validation** is the tell.
 - **Dynamic PoC:** any page the victim opens can drive it —
   ```html
@@ -144,8 +144,8 @@ as committed.
 ### F6 — Open redirect with a bypassable allowlist
 **Severity: Medium · CWE-601**
 
-- **Where:** `safeNavigate()` [app.js:164–169](app.js:164), reached from `handleReturnParam()` [app.js:159–162](app.js:159) on the `next`/`redirect` query param at boot.
-- **Root cause:** the allowlist is a prefix test on hosts with **no trailing separator** (`dest.indexOf("https://nexacloud.example") === 0`, [app.js:166](app.js:166)) plus a "relative URLs are fine" shortcut (`dest.charAt(0) === "/"`, [app.js:167](app.js:167)).
+- **Where:** `safeNavigate()` [app.js:244–249](app.js:244), reached from `handleReturnParam()` [app.js:239–242](app.js:239) on the `next`/`redirect` query param at boot.
+- **Root cause:** the allowlist is a prefix test on hosts with **no trailing separator** (`dest.indexOf("https://nexacloud.example") === 0`, [app.js:246](app.js:246)) plus a "relative URLs are fine" shortcut (`dest.charAt(0) === "/"`, [app.js:247](app.js:247)).
 - **Bypasses (verified against the exact predicate):**
   - `?next=https://nexacloud.example.evil.com/x` → attacker domain **passes** (prefix match).
   - `?next=//evil.com` → protocol-relative URL **passes** the `charAt(0)==='/'` shortcut → cross-origin redirect.
@@ -182,11 +182,24 @@ php -S 127.0.0.1:8099                             # if you have PHP
 
 Then point your agent / scanner at **`http://127.0.0.1:8099/`**.
 
-**Why HTTP is fine:** the app uses `window.crypto.subtle` (JWT signing/verify),
-which requires a *secure context*. Browsers treat `localhost` / `127.0.0.1` as
-secure, so plain HTTP works — no certificate needed. (If you serve it from a
-different hostname or a LAN IP, `crypto.subtle` will be `undefined` and F2 won't
-run; stick to `localhost` / `127.0.0.1`.)
+**Containerized scanners (e.g. Strix).** Tools that run their browser inside
+Docker can't reach `127.0.0.1` on your host. Bind all interfaces and target
+`host.docker.internal`:
+
+```bash
+python serve.py 8099 0.0.0.0        # reachable from Docker; also on your LAN
+```
+
+Then point the tool at **`http://host.docker.internal:8099/`**. (Bind `0.0.0.0`
+only while testing — it exposes the target to your local network; allow it on a
+private network only, and stop the server when done.)
+
+**Why HTTP is fine on any origin:** the app uses `window.crypto.subtle` (JWT
+signing/verify), which needs a *secure context*. Browsers treat `localhost` /
+`127.0.0.1` as secure, so plain HTTP works there. When the origin is **not**
+localhost (e.g. `host.docker.internal`), `crypto.subtle` is unavailable, so the
+app falls back to an **in-page HMAC-SHA256** — identical output, so F2 (and login)
+work over any origin. No certificate needed either way.
 
 **Paths:** everything sits at the origin root — `/app.js.map`, `/robots.txt`, and
 routes like `/#/admin`, `/#/search?q=…` — which is where a scanner expects them.

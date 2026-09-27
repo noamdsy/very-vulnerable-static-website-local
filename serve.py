@@ -3,11 +3,14 @@
 Local static server for the NexaCloud vulnerable test target.
 
 Usage:
-    python serve.py            # serves on http://127.0.0.1:8099
-    python serve.py 9000       # serves on http://127.0.0.1:9000
+    python serve.py                  # http://127.0.0.1:8099  (loopback only)
+    python serve.py 9000             # custom port, loopback only
+    python serve.py 8099 0.0.0.0     # bind all interfaces (reachable from Docker
+                                     # via host.docker.internal:8099 — e.g. Strix)
 
-localhost is a "secure context", so window.crypto.subtle (used by the app's
-JWT signing/verification) works over plain HTTP — no TLS needed.
+localhost / 127.0.0.1 is a "secure context", so window.crypto.subtle works over
+plain HTTP there. When reached from another origin (e.g. host.docker.internal),
+the app falls back to an in-page HMAC, so JWT signing/verification still works.
 Point your scanner / agent at the printed URL. Ctrl+C to stop.
 """
 import http.server
@@ -18,7 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8099
-HOST = "127.0.0.1"
+HOST = sys.argv[2] if len(sys.argv) > 2 else "127.0.0.1"
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -49,14 +52,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 def main():
     socketserver.TCPServer.allow_reuse_address = True
+    all_ifaces = HOST in ("0.0.0.0", "::", "")
+    local_host = "127.0.0.1" if all_ifaces else HOST
+    local_url = "http://%s:%d/" % (local_host, PORT)
     with socketserver.TCPServer((HOST, PORT), Handler) as httpd:
-        url = "http://%s:%d/" % (HOST, PORT)
         print("NexaCloud test target serving at:")
-        print("    " + url)
+        print("    " + local_url + "   (this machine)")
+        if all_ifaces:
+            print("    http://host.docker.internal:%d/   (from Docker, e.g. Strix)" % PORT)
+            print("    Bound to all interfaces — reachable on your LAN. Stop it when done.")
         print("Serving folder: %s" % ROOT)
         print("Press Ctrl+C to stop.\n")
         try:
-            webbrowser.open(url)
+            webbrowser.open(local_url)
         except Exception:
             pass
         try:

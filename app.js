@@ -96,20 +96,101 @@
     return bytes;
   }
 
-  function importKey(usage) {
-    return crypto.subtle.importKey(
-      "raw", enc.encode(SESSION_KEY),
-      { name: "HMAC", hash: "SHA-256" }, false, usage
-    );
+  // SHA-256 over a byte array -> 32-byte digest.
+  function sha256Bytes(bytes) {
+    var K = [
+      0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+      0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+      0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+      0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+      0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+    ];
+    var H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+    var l = bytes.length, bitLen = l * 8;
+    var total = (((l + 8) >> 6) + 1) * 64;
+    var m = new Uint8Array(total);
+    m.set(bytes);
+    m[l] = 0x80;
+    var hi = Math.floor(bitLen / 0x100000000), lo = bitLen >>> 0;
+    m[total - 8] = (hi >>> 24) & 0xff; m[total - 7] = (hi >>> 16) & 0xff;
+    m[total - 6] = (hi >>> 8) & 0xff;  m[total - 5] = hi & 0xff;
+    m[total - 4] = (lo >>> 24) & 0xff; m[total - 3] = (lo >>> 16) & 0xff;
+    m[total - 2] = (lo >>> 8) & 0xff;  m[total - 1] = lo & 0xff;
+    function rotr(x, n) { return (x >>> n) | (x << (32 - n)); }
+    var w = new Array(64);
+    for (var i = 0; i < total; i += 64) {
+      for (var t = 0; t < 16; t++) {
+        w[t] = ((m[i+t*4] << 24) | (m[i+t*4+1] << 16) | (m[i+t*4+2] << 8) | m[i+t*4+3]) >>> 0;
+      }
+      for (t = 16; t < 64; t++) {
+        var s0 = rotr(w[t-15],7) ^ rotr(w[t-15],18) ^ (w[t-15] >>> 3);
+        var s1 = rotr(w[t-2],17) ^ rotr(w[t-2],19) ^ (w[t-2] >>> 10);
+        w[t] = (w[t-16] + s0 + w[t-7] + s1) >>> 0;
+      }
+      var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+      for (t = 0; t < 64; t++) {
+        var S1 = rotr(e,6) ^ rotr(e,11) ^ rotr(e,25);
+        var ch = (e & f) ^ (~e & g);
+        var t1 = (h + S1 + ch + K[t] + w[t]) >>> 0;
+        var S0 = rotr(a,2) ^ rotr(a,13) ^ rotr(a,22);
+        var maj = (a & b) ^ (a & c) ^ (b & c);
+        var t2 = (S0 + maj) >>> 0;
+        h=g; g=f; f=e; e=(d+t1)>>>0; d=c; c=b; b=a; a=(t1+t2)>>>0;
+      }
+      H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
+      H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
+    }
+    var out = new Uint8Array(32);
+    for (var j = 0; j < 8; j++) {
+      out[j*4] = (H[j] >>> 24) & 0xff; out[j*4+1] = (H[j] >>> 16) & 0xff;
+      out[j*4+2] = (H[j] >>> 8) & 0xff; out[j*4+3] = H[j] & 0xff;
+    }
+    return out;
+  }
+
+  function hmacSha256Bytes(keyBytes, msgBytes) {
+    var B = 64;
+    var key = keyBytes.length > B ? sha256Bytes(keyBytes) : keyBytes;
+    var pad = new Uint8Array(B); pad.set(key);
+    var iKey = new Uint8Array(B), oKey = new Uint8Array(B);
+    for (var i = 0; i < B; i++) { iKey[i] = pad[i] ^ 0x36; oKey[i] = pad[i] ^ 0x5c; }
+    var inner = new Uint8Array(B + msgBytes.length);
+    inner.set(iKey, 0); inner.set(msgBytes, B);
+    var ih = sha256Bytes(inner);
+    var outer = new Uint8Array(B + 32);
+    outer.set(oKey, 0); outer.set(ih, B);
+    return sha256Bytes(outer);
+  }
+
+  // HMAC-SHA256 of a string. Uses WebCrypto when the origin is a secure
+  // context; otherwise falls back to the in-page implementation so the
+  // console still works when served over plain HTTP.
+  function hmacSign(dataStr) {
+    var msg = enc.encode(dataStr);
+    if (window.crypto && window.crypto.subtle) {
+      return crypto.subtle.importKey("raw", enc.encode(SESSION_KEY),
+        { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+        .then(function (key) { return crypto.subtle.sign("HMAC", key, msg); })
+        .then(function (sig) { return new Uint8Array(sig); });
+    }
+    return Promise.resolve(hmacSha256Bytes(enc.encode(SESSION_KEY), msg));
+  }
+
+  function bytesEqual(a, b) {
+    if (a.length !== b.length) return false;
+    var diff = 0;
+    for (var i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+    return diff === 0;
   }
 
   function signToken(payload) {
     var header = { alg: "HS256", typ: "JWT" };
     var data = b64urlFromString(JSON.stringify(header)) + "." + b64urlFromString(JSON.stringify(payload));
-    return importKey(["sign"]).then(function (key) {
-      return crypto.subtle.sign("HMAC", key, enc.encode(data));
-    }).then(function (sig) {
-      return data + "." + b64urlFromBytes(new Uint8Array(sig));
+    return hmacSign(data).then(function (sig) {
+      return data + "." + b64urlFromBytes(sig);
     });
   }
 
@@ -117,10 +198,9 @@
     var parts = (token || "").split(".");
     if (parts.length !== 3) return Promise.resolve(null);
     var data = parts[0] + "." + parts[1];
-    return importKey(["verify"]).then(function (key) {
-      return crypto.subtle.verify("HMAC", key, b64urlToBytes(parts[2]), enc.encode(data));
-    }).then(function (ok) {
-      if (!ok) return null;
+    var provided = b64urlToBytes(parts[2]);
+    return hmacSign(data).then(function (expected) {
+      if (!bytesEqual(provided, expected)) return null;
       try { return JSON.parse(dec.decode(b64urlToBytes(parts[1]))); }
       catch (e) { return null; }
     });
